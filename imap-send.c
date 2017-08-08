@@ -69,16 +69,36 @@ static char *next_arg(char **);
 __attribute__((format (printf, 3, 4)))
 static int nfsnprintf(char *buf, int blen, const char *fmt, ...);
 
-static int nfvasprintf(char **strp, const char *fmt, va_list ap)
+__attribute__((format (printf, 2, 3)))
+static int nfvasprintf(char **strp, const char *fmt, ...)
 {
+	va_list ap;
 	int len;
 	char tmp[8192];
 
+	va_start(ap, fmt);
 	len = vsnprintf(tmp, sizeof(tmp), fmt, ap);
+	va_end(ap);
 	if (len < 0)
 		die("Fatal: Out of memory");
 	if (len >= sizeof(tmp))
 		die("imap command overflow!");
+
+	*strp = xmemdupz(tmp, len);
+	return len;
+}
+
+static int imap_vasprint_command(char **strp, const char *command, va_list ap)
+{
+	const char *astring;
+	int len;
+	char tmp[8192];
+
+	len = nfsnprintf(tmp, sizeof(tmp), "%s", command);
+
+	while(astring = va_arg(ap, const char*))
+		len += nfsnprintf(tmp + len, sizeof(tmp) - len, " \"%s\"", astring);
+
 	*strp = xmemdupz(tmp, len);
 	return len;
 }
@@ -518,7 +538,7 @@ static int nfsnprintf(char *buf, int blen, const char *fmt, ...)
 
 static struct imap_cmd *issue_imap_cmd(struct imap_store *ctx,
 				       struct imap_cmd_cb *cb,
-				       const char *fmt, va_list ap)
+				       const char *command, va_list ap)
 {
 	struct imap *imap = ctx->imap;
 	struct imap_cmd *cmd;
@@ -526,7 +546,7 @@ static struct imap_cmd *issue_imap_cmd(struct imap_store *ctx,
 	char buf[1024];
 
 	cmd = xmalloc(sizeof(struct imap_cmd));
-	nfvasprintf(&cmd->cmd, fmt, ap);
+	imap_vasprint_command(&cmd->cmd, command, ap);
 	cmd->tag = ++imap->nexttag;
 
 	if (cb)
@@ -581,15 +601,14 @@ static struct imap_cmd *issue_imap_cmd(struct imap_store *ctx,
 	return cmd;
 }
 
-__attribute__((format (printf, 3, 4)))
 static int imap_exec(struct imap_store *ctx, struct imap_cmd_cb *cb,
-		     const char *fmt, ...)
+		     const char *command, ...)
 {
 	va_list ap;
 	struct imap_cmd *cmdp;
 
-	va_start(ap, fmt);
-	cmdp = issue_imap_cmd(ctx, cb, fmt, ap);
+	va_start(ap, command);
+	cmdp = issue_imap_cmd(ctx, cb, command, ap);
 	va_end(ap);
 	if (!cmdp)
 		return RESP_BAD;
@@ -597,15 +616,14 @@ static int imap_exec(struct imap_store *ctx, struct imap_cmd_cb *cb,
 	return get_cmd_result(ctx, cmdp);
 }
 
-__attribute__((format (printf, 3, 4)))
 static int imap_exec_m(struct imap_store *ctx, struct imap_cmd_cb *cb,
-		       const char *fmt, ...)
+		       const char *command, ...)
 {
 	va_list ap;
 	struct imap_cmd *cmdp;
 
-	va_start(ap, fmt);
-	cmdp = issue_imap_cmd(ctx, cb, fmt, ap);
+	va_start(ap, command);
+	cmdp = issue_imap_cmd(ctx, cb, command, ap);
 	va_end(ap);
 	if (!cmdp)
 		return DRV_STORE_BAD;
@@ -848,7 +866,7 @@ static void imap_close_server(struct imap_store *ictx)
 	struct imap *imap = ictx->imap;
 
 	if (imap->buf.sock.fd[0] != -1) {
-		imap_exec(ictx, NULL, "LOGOUT");
+		imap_exec(ictx, NULL, "LOGOUT", NULL);
 		socket_shutdown(&imap->buf.sock);
 	}
 	free(imap);
@@ -1090,19 +1108,19 @@ static struct imap_store *imap_open_store(struct imap_server_conf *srvc, char *f
 		goto bail;
 	}
 	parse_response_code(ctx, NULL, rsp);
-	if (!imap->caps && imap_exec(ctx, NULL, "CAPABILITY") != RESP_OK)
+	if (!imap->caps && imap_exec(ctx, NULL, "CAPABILITY", NULL) != RESP_OK)
 		goto bail;
 
 	if (!preauth) {
 #ifndef NO_OPENSSL
 		if (!srvc->use_ssl && CAP(STARTTLS)) {
-			if (imap_exec(ctx, NULL, "STARTTLS") != RESP_OK)
+			if (imap_exec(ctx, NULL, "STARTTLS", NULL) != RESP_OK)
 				goto bail;
 			if (ssl_socket_connect(&imap->buf.sock, 1,
 					       srvc->ssl_verify))
 				goto bail;
 			/* capabilities may have changed, so get the new capabilities */
-			if (imap_exec(ctx, NULL, "CAPABILITY") != RESP_OK)
+			if (imap_exec(ctx, NULL, "CAPABILITY", NULL) != RESP_OK)
 				goto bail;
 		}
 #endif
@@ -1123,7 +1141,7 @@ static struct imap_store *imap_open_store(struct imap_server_conf *srvc, char *f
 
 				memset(&cb, 0, sizeof(cb));
 				cb.cont = auth_cram_md5;
-				if (imap_exec(ctx, &cb, "AUTHENTICATE CRAM-MD5") != RESP_OK) {
+				if (imap_exec(ctx, &cb, "AUTHENTICATE CRAM-MD5", NULL) != RESP_OK) {
 					fprintf(stderr, "IMAP error: AUTHENTICATE CRAM-MD5 failed\n");
 					goto bail;
 				}
@@ -1140,7 +1158,7 @@ static struct imap_store *imap_open_store(struct imap_server_conf *srvc, char *f
 			if (!imap->buf.sock.ssl)
 				imap_warn("*** IMAP Warning *** Password is being "
 					  "sent in the clear\n");
-			if (imap_exec(ctx, NULL, "LOGIN \"%s\" \"%s\"", srvc->user, srvc->pass) != RESP_OK) {
+			if (imap_exec(ctx, NULL, "LOGIN", srvc->user, srvc->pass, NULL) != RESP_OK) {
 				fprintf(stderr, "IMAP error: LOGIN failed\n");
 				goto bail;
 			}
@@ -1153,7 +1171,7 @@ static struct imap_store *imap_open_store(struct imap_server_conf *srvc, char *f
 
 	/* check the target mailbox exists */
 	ctx->name = folder;
-	switch (imap_exec(ctx, NULL, "EXAMINE \"%s\"", ctx->name)) {
+	switch (imap_exec(ctx, NULL, "EXAMINE", ctx->name, NULL)) {
 	case RESP_OK:
 		/* ok */
 		break;
@@ -1161,7 +1179,7 @@ static struct imap_store *imap_open_store(struct imap_server_conf *srvc, char *f
 		fprintf(stderr, "IMAP error: could not check mailbox\n");
 		goto out;
 	case RESP_NO:
-		if (imap_exec(ctx, NULL, "CREATE \"%s\"", ctx->name) == RESP_OK) {
+		if (imap_exec(ctx, NULL, "CREATE", ctx->name, NULL) == RESP_OK) {
 			imap_info("Created missing mailbox\n");
 		} else {
 			fprintf(stderr, "IMAP error: could not create missing mailbox\n");
@@ -1224,6 +1242,7 @@ static int imap_store_msg(struct imap_store *ctx, struct strbuf *msg)
 	struct imap *imap = ctx->imap;
 	struct imap_cmd_cb cb;
 	const char *prefix, *box;
+	char *str;
 	int ret;
 
 	lf_to_crlf(msg);
@@ -1234,7 +1253,10 @@ static int imap_store_msg(struct imap_store *ctx, struct strbuf *msg)
 
 	box = ctx->name;
 	prefix = !strcmp(box, "INBOX") ? "" : ctx->prefix;
-	ret = imap_exec_m(ctx, &cb, "APPEND \"%s%s\" ", prefix, box);
+	nfvasprintf(&str, "%s%s", prefix, box);
+	printf("Prefix=%s Box=%s Str=%s\n", prefix, box, str);
+	ret = imap_exec_m(ctx, &cb, "APPEND", str, NULL);
+	free(str);
 	imap->caps = imap->rcaps;
 	if (ret != DRV_OK)
 		return ret;
