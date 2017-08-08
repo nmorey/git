@@ -88,6 +88,36 @@ static int nfvasprintf(char **strp, const char *fmt, ...)
 	return len;
 }
 
+static int imap_snprint_astring(char *str, size_t size, const char *astring)
+{
+	const char *p = astring;
+	char *cur = str;
+
+	if (cur - str >= size - 2)
+		die("imap command overflow!");
+	*(cur++) = ' ';
+	*(cur++) = '"';
+
+	for (p = astring; *p; ++p) {
+		if (*p == '\\' || *p == '"') {
+			*(cur++) = '\\';
+			if (cur - str == size)
+				die("imap command overflow!");
+		}
+
+		*(cur++) = *p;
+		if (cur - str == size)
+			die("imap command overflow!");
+	}
+
+	if (cur - str >= size - 2)
+		die("imap command overflow!");
+	*(cur++) = '"';
+	*(cur++) = 0;
+
+	return cur - str - 1;
+}
+
 static int imap_vasprint_command(char **strp, const char *command, va_list ap)
 {
 	const char *astring;
@@ -97,7 +127,8 @@ static int imap_vasprint_command(char **strp, const char *command, va_list ap)
 	len = nfsnprintf(tmp, sizeof(tmp), "%s", command);
 
 	while(astring = va_arg(ap, const char*))
-		len += nfsnprintf(tmp + len, sizeof(tmp) - len, " \"%s\"", astring);
+		len += imap_snprint_astring(tmp + len, sizeof(tmp) - len,
+					    astring);
 
 	*strp = xmemdupz(tmp, len);
 	return len;
