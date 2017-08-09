@@ -1408,6 +1408,21 @@ static int append_msgs_to_imap(struct imap_server_conf *server,
 }
 
 #ifdef USE_CURL_FOR_IMAP_SEND
+#if LIBCURL_VERSION_NUM >= 0x071505
+static curl_socket_t curl_tunnel_socket(void *clientp,
+					curlsocktype purpose,
+					struct curl_sockaddr *address)
+{
+	return (unsigned long)clientp;
+}
+
+static int sockopt_callback(void *clientp, curl_socket_t curlfd,
+				 curlsocktype purpose)
+{
+	return CURL_SOCKOPT_ALREADY_CONNECTED;
+}
+#endif
+
 static CURL *setup_curl(struct imap_server_conf *srvc)
 {
 	CURL *curl;
@@ -1424,8 +1439,25 @@ static CURL *setup_curl(struct imap_server_conf *srvc)
 	curl_easy_setopt(curl, CURLOPT_USERNAME, server.user);
 	curl_easy_setopt(curl, CURLOPT_PASSWORD, server.pass);
 
-	strbuf_addstr(&path, server.use_ssl ? "imaps://" : "imap://");
-	strbuf_addstr(&path, server.host);
+	if (srvc->tunnel) {
+#if LIBCURL_VERSION_NUM >= 0x071505
+		int fds[2];
+
+		setup_tunnel(srvc, fds);
+		curl_easy_setopt(curl, CURLOPT_OPENSOCKETFUNCTION, curl_tunnel_socket);
+		curl_easy_setopt(curl, CURLOPT_OPENSOCKETDATA, (unsigned long)fds[0]);
+		curl_easy_setopt(curl, CURLOPT_SOCKOPTFUNCTION, sockopt_callback);
+		/* Create a fake hostname to avoid resolution issue and in case
+		 * imap.host was not set */
+		strbuf_addstr(&path, "imap://localhost");
+#else
+		die("curl version does not support tunneling");
+#endif
+	} else {
+		strbuf_addstr(&path, server.use_ssl ? "imaps://" : "imap://");
+		strbuf_addstr(&path, server.host);
+	}
+
 	if (!path.len || path.buf[path.len - 1] != '/')
 		strbuf_addch(&path, '/');
 	strbuf_addstr(&path, server.folder);
@@ -1570,12 +1602,12 @@ int cmd_main(int argc, const char **argv)
 
 	/* write it to the imap server */
 
-	if (server.tunnel)
-		return append_msgs_to_imap(&server, &all_msgs, total);
-
 #ifdef USE_CURL_FOR_IMAP_SEND
 	if (use_curl)
-		return curl_append_msgs_to_imap(&server, &all_msgs, total);
+#if LIBCURL_VERSION_NUM < 0x071505
+		if (!server.tunnel)
+#endif
+			return curl_append_msgs_to_imap(&server, &all_msgs, total);
 #endif
 
 	return append_msgs_to_imap(&server, &all_msgs, total);
