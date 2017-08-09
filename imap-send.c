@@ -929,18 +929,27 @@ static int auth_cram_md5(struct imap_store *ctx, struct imap_cmd *cmd, const cha
 static void setup_tunnel(struct imap_server_conf *srvc, int fds[2])
 {
 	struct child_process tunnel = CHILD_PROCESS_INIT;
+	int sock_fds[2];
 
 	imap_info("Starting tunnel '%s'... ", srvc->tunnel);
 
+	if (socketpair(AF_UNIX, SOCK_STREAM, 0, sock_fds))
+		die("failed to create socketpair for proxy");
+
 	argv_array_push(&tunnel.args, srvc->tunnel);
 	tunnel.use_shell = 1;
-	tunnel.in = -1;
-	tunnel.out = -1;
+	tunnel.in = sock_fds[1];
+	/* Duplicate the fd as the child process requires
+	 * 1 for stdin, one for stdout */
+	tunnel.out = dup(sock_fds[1]);
+	if (tunnel.out < 0)
+		die("failed to create fd to proxy");
+
 	if (start_command(&tunnel))
 		die("cannot start proxy %s", srvc->tunnel);
 
-	fds[0] = tunnel.out;
-	fds[1] = tunnel.in;
+	fds[0] = sock_fds[0];
+	fds[1] = sock_fds[0];
 
 	imap_info("ok\n");
 
