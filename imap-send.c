@@ -926,6 +926,27 @@ static int auth_cram_md5(struct imap_store *ctx, struct imap_cmd *cmd, const cha
 	return 0;
 }
 
+static void setup_tunnel(struct imap_server_conf *srvc, int fds[2])
+{
+	struct child_process tunnel = CHILD_PROCESS_INIT;
+
+	imap_info("Starting tunnel '%s'... ", srvc->tunnel);
+
+	argv_array_push(&tunnel.args, srvc->tunnel);
+	tunnel.use_shell = 1;
+	tunnel.in = -1;
+	tunnel.out = -1;
+	if (start_command(&tunnel))
+		die("cannot start proxy %s", srvc->tunnel);
+
+	fds[0] = tunnel.out;
+	fds[1] = tunnel.in;
+
+	imap_info("ok\n");
+
+	return;
+}
+
 static struct imap_store *imap_open_store(struct imap_server_conf *srvc, char *folder)
 {
 	struct credential cred = CREDENTIAL_INIT;
@@ -943,21 +964,7 @@ static struct imap_store *imap_open_store(struct imap_server_conf *srvc, char *f
 	/* open connection to IMAP server */
 
 	if (srvc->tunnel) {
-		struct child_process tunnel = CHILD_PROCESS_INIT;
-
-		imap_info("Starting tunnel '%s'... ", srvc->tunnel);
-
-		argv_array_push(&tunnel.args, srvc->tunnel);
-		tunnel.use_shell = 1;
-		tunnel.in = -1;
-		tunnel.out = -1;
-		if (start_command(&tunnel))
-			die("cannot start proxy %s", srvc->tunnel);
-
-		imap->buf.sock.fd[0] = tunnel.out;
-		imap->buf.sock.fd[1] = tunnel.in;
-
-		imap_info("ok\n");
+		setup_tunnel(srvc, imap->buf.sock.fd);
 	} else {
 #ifndef NO_IPV6
 		struct addrinfo hints, *ai0, *ai;
