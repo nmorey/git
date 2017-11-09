@@ -996,11 +996,11 @@ static void make_cover_letter(struct rev_info *rev, int use_stdout,
 			      struct commit *origin,
 			      int nr, struct commit **list,
 			      const char *branch_name,
-			      int quiet)
+			      int quiet,
+			      struct commit *cover_at_tip_commit)
 {
 	const char *committer;
-	const char *body = "*** SUBJECT HERE ***\n\n*** BLURB HERE ***\n";
-	const char *msg;
+	const char *body = "*** SUBJECT HERE ***\n\n*** BLURB HERE ***\n\n";
 	struct shortlog log;
 	struct strbuf sb = STRBUF_INIT;
 	int i;
@@ -1031,17 +1031,22 @@ static void make_cover_letter(struct rev_info *rev, int use_stdout,
 	if (!branch_name)
 		branch_name = find_branch_name(rev);
 
-	msg = body;
 	pp.fmt = CMIT_FMT_EMAIL;
 	pp.date_mode.type = DATE_RFC2822;
 	pp.rev = rev;
 	pp.print_email_subject = 1;
-	pp_user_info(&pp, NULL, &sb, committer, encoding);
-	pp_title_line(&pp, &msg, &sb, encoding, need_8bit_cte);
-	pp_remainder(&pp, &msg, &sb, 0);
-	add_branch_description(&sb, branch_name);
-	fprintf(rev->diffopt.file, "%s\n", sb.buf);
 
+	if (!cover_at_tip_commit) {
+		pp_user_info(&pp, NULL, &sb, committer, encoding);
+		pp_title_line(&pp, &body, &sb, encoding, need_8bit_cte);
+		pp_remainder(&pp, &body, &sb, 0);
+	} else {
+		pretty_print_commit(&pp, cover_at_tip_commit, &sb);
+	}
+	add_branch_description(&sb, branch_name);
+	fprintf(rev->diffopt.file, "%s", sb.buf);
+	if (cover_at_tip_commit)
+			fprintf(rev->diffopt.file, "---\n", sb.buf);
 	strbuf_release(&sb);
 
 	shortlog_init(&log);
@@ -1420,6 +1425,8 @@ int cmd_format_patch(int argc, const char **argv, const char *prefix)
 	int just_numbers = 0;
 	int ignore_if_in_upstream = 0;
 	int cover_letter = -1;
+	int cover_at_tip = -1;
+	struct commit *cover_at_tip_commit = NULL;
 	int boundary_count = 0;
 	int no_binary_diff = 0;
 	int zero_commit = 0;
@@ -1448,6 +1455,8 @@ int cmd_format_patch(int argc, const char **argv, const char *prefix)
 			    N_("print patches to standard out")),
 		OPT_BOOL(0, "cover-letter", &cover_letter,
 			    N_("generate a cover letter")),
+		OPT_BOOL(0, "cover-at-tip", &cover_at_tip,
+			    N_("fill the cover letter with the tip of the branch")),
 		OPT_BOOL(0, "numbered-files", &just_numbers,
 			    N_("use simple number sequence for output file names")),
 		OPT_STRING(0, "suffix", &fmt_patch_suffix, N_("sfx"),
@@ -1711,6 +1720,21 @@ int cmd_format_patch(int argc, const char **argv, const char *prefix)
 		if (ignore_if_in_upstream && has_commit_patch_id(commit, &ids))
 			continue;
 
+		if (!nr && cover_at_tip == 1 && !cover_at_tip_commit) {
+			/* Check that it is a candidate to be a cover at tip
+			 * Meaning:
+			 * - a single parent (merge commits are not eligible)
+			 * - tree oid == parent->tree->oid (no diff to the tree)
+			 */
+			if (commit->parents && !commit->parents->next &&
+			    !oidcmp(&commit->tree->object.oid,
+				    &commit->parents->item->tree->object.oid)) {
+				cover_at_tip_commit = commit;
+				continue;
+			} else {
+				cover_at_tip = 0;
+			}
+		}
 		nr++;
 		REALLOC_ARRAY(list, nr);
 		list[nr - 1] = commit;
@@ -1761,7 +1785,8 @@ int cmd_format_patch(int argc, const char **argv, const char *prefix)
 		if (thread)
 			gen_message_id(&rev, "cover");
 		make_cover_letter(&rev, use_stdout,
-				  origin, nr, list, branch_name, quiet);
+				  origin, nr, list, branch_name, quiet,
+				  cover_at_tip_commit);
 		print_bases(&bases, rev.diffopt.file);
 		print_signature(rev.diffopt.file);
 		total++;

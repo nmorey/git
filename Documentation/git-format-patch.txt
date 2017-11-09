@@ -228,6 +228,10 @@ feeding the result to `git send-email`.
 	containing the branch description, shortlog and the overall diffstat.  You can
 	fill in a description in the file before sending it out.
 
+--[no-]cover-letter-at-tip::
+	Use the tip of the series as a cover letter if it is an empty commit.
+    If no cover-letter is to be sent, the tip is ignored.
+
 --notes[=<ref>]::
 	Append the notes (see linkgit:git-notes[1]) for the commit
 	after the three-dash line.
