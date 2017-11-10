@@ -125,6 +125,7 @@ extern int check_apply_state(struct apply_state *state, int force_apply);
  */
 #define APPLY_OPT_INACCURATE_EOF	(1<<0) /* accept inaccurate eof */
 #define APPLY_OPT_RECOUNT		(1<<1) /* accept inaccurate line count */
+#define APPLY_OPT_EMPTY 		(1<<2) /* accept patch without diff */
 
 extern int apply_all_patches(struct apply_state *state,
 			     int argc,

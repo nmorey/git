@@ -4678,9 +4678,11 @@ static int apply_patch(struct apply_state *state,
 	}
 
 	if (!list && !skipped_patch) {
-		error(_("unrecognized input"));
-		res = -128;
-		goto end;
+		if (!(options & APPLY_OPT_EMPTY) || buf.len > 0) {
+			error(_("unrecognized input"));
+			res = -128;
+			goto end;
+		}
 	}
 
 	if (state->whitespace_error && (state->ws_error_action == die_on_ws_error))
@@ -4981,6 +4983,9 @@ int apply_parse_options(int argc, const char **argv,
 		OPT_BIT(0, "recount", options,
 			N_("do not trust the line counts in the hunk headers"),
 			APPLY_OPT_RECOUNT),
+		OPT_BIT(0, "allow-empty", options,
+			N_("allow patch without hunks"),
+			APPLY_OPT_EMPTY),
 		{ OPTION_CALLBACK, 0, "directory", state, N_("root"),
 			N_("prepend <root> to all filenames"),
 			0, apply_option_parse_directory },
