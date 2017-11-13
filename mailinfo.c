@@ -1052,6 +1052,57 @@ static void output_header_lines(FILE *fout, const char *hdr, const struct strbuf
 	}
 }
 
+/*
+ * Tries to extract series info [... N/M] within the subject
+ */
+static void extract_series_info(struct mailinfo *mi, const struct strbuf *subject)
+{
+	size_t at = 0;
+	size_t pt;
+	char *pos;
+	int ret, num, total;
+
+	while (at < subject->len) {
+		/* Look for brackets */
+		pos = strchr(subject->buf + at, '[');
+		if (!pos)
+			break;
+		at = pos - subject->buf;
+
+		pos = strchr(subject->buf + at, ']');
+		if (!pos)
+			break;
+
+		pt = pos - subject->buf - 1;
+		at = pt;
+		/*
+		 * Look for a N/M series identifier at
+		 * the end of the brackets.
+		 */
+
+		if (!isdigit(subject->buf[pt]))
+			at = pt;
+		else {
+			while(isdigit(subject->buf[--pt]));
+		}
+
+		if(subject->buf[pt--] != '/')
+			continue;
+
+		if (!isdigit(subject->buf[pt]))
+			continue;
+		while(isdigit(subject->buf[--pt]));
+		pt++;
+
+		ret = sscanf(subject->buf + pt, "%d/%d]", &num, &total);
+		if (ret == 2){
+			mi->series_id = num;
+			mi->series_len = total;
+			break;
+		}
+	}
+}
+
 static void handle_info(struct mailinfo *mi)
 {
 	struct strbuf *hdr;
@@ -1067,6 +1118,7 @@ static void handle_info(struct mailinfo *mi)
 			continue;
 
 		if (!strcmp(header[i], "Subject")) {
+			extract_series_info(mi, hdr);
 			if (!mi->keep_subject) {
 				cleanup_subject(mi, hdr);
 				cleanup_space(hdr);
@@ -1081,6 +1133,11 @@ static void handle_info(struct mailinfo *mi)
 			cleanup_space(hdr);
 			fprintf(mi->output, "%s: %s\n", header[i], hdr->buf);
 		}
+		if (mi->series_id >= 0) {
+			fprintf(mi->output, "PatchNumber: %d\n", mi->series_id);
+			fprintf(mi->output, "TotalPatches: %d\n", mi->series_len);
+		}
+
 	}
 	fprintf(mi->output, "\n");
 }
@@ -1154,6 +1211,8 @@ void setup_mailinfo(struct mailinfo *mi)
 	mi->header_stage = 1;
 	mi->use_inbody_headers = 1;
 	mi->content_top = mi->content;
+	mi->series_id = -1;
+	mi->series_len = -1;
 	git_config(git_mailinfo_config, mi);
 }
 

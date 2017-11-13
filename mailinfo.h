@@ -21,6 +21,8 @@ struct mailinfo {
 	struct strbuf **content_top;
 	struct strbuf charset;
 	char *message_id;
+	int series_id;    /* Id of the patch within a patch series. -1 if not a patch series */
+	int series_len;   /* Length of the patch series. -1 if not a patch series */
 	enum  {
 		TE_DONTCARE, TE_QP, TE_BASE64
 	} transfer_encoding;
