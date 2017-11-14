@@ -1091,6 +1091,25 @@ static void am_setup(struct am_state *state, enum patch_format patch_format,
 	strbuf_release(&sb);
 }
 
+
+/**
+ * Cleans am_state
+ */
+static void am_clean(struct am_state *state)
+{
+	FREE_AND_NULL(state->author_name);
+	FREE_AND_NULL(state->author_email);
+	FREE_AND_NULL(state->author_date);
+	FREE_AND_NULL(state->msg);
+	state->msg_len = 0;
+
+	unlink(am_path(state, "author-script"));
+	unlink(am_path(state, "final-commit"));
+
+	oidclr(&state->orig_commit);
+	unlink(am_path(state, "original-commit"));
+}
+
 /**
  * Increments the patch pointer, and cleans am_state for the application of the
  * next patch.
