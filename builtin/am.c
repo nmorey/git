@@ -1111,25 +1111,6 @@ static void am_clean(struct am_state *state)
 }
 
 /**
- * Increments the patch pointer, and cleans am_state for the application of the
- * next patch.
- */
-static void am_next(struct am_state *state)
-{
-	struct object_id head;
-
-	am_clean(state);
-
-	if (!get_oid("HEAD", &head))
-		write_state_text(state, "abort-safety", oid_to_hex(&head));
-	else
-		write_state_text(state, "abort-safety", "");
-
-	state->cur++;
-	write_state_count(state, "next", state->cur);
-}
-
-/**
  * Returns the filename of the current patch email.
  */
 static const char *msgnum(const struct am_state *state)
@@ -1750,6 +1731,25 @@ static int do_interactive(struct am_state *state)
 			run_command(&cp);
 		}
 	}
+}
+
+/**
+ * Increments the patch pointer, and cleans am_state for the application of the
+ * next patch.
+ */
+static void am_next(struct am_state *state)
+{
+	struct object_id head;
+
+	am_clean(state);
+
+	if (!get_oid("HEAD", &head))
+		write_state_text(state, "abort-safety", oid_to_hex(&head));
+	else
+		write_state_text(state, "abort-safety", "");
+
+	state->cur++;
+	write_state_count(state, "next", state->cur);
 }
 
 /**
