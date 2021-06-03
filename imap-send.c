@@ -91,6 +91,7 @@ struct imap_server_conf {
 	const char *folder;
 	const char *user;
 	const char *pass;
+	const char *oauth;
 	int use_ssl;
 	int ssl_verify;
 	int use_html;
@@ -105,6 +106,7 @@ static struct imap_server_conf server = {
 	NULL,	/* folder */
 	NULL,	/* user */
 	NULL,	/* pass */
+	NULL,   /* oauth */
 	0,   	/* use_ssl */
 	1,   	/* ssl_verify */
 	0,   	/* use_html */
@@ -1355,6 +1357,8 @@ static int git_imap_config(const char *var, const char *val, void *cb)
 		return git_config_string(&server.tunnel, var, val);
 	else if (!strcmp("imap.authmethod", var))
 		return git_config_string(&server.auth_method, var, val);
+	else if (!strcmp("imap.oauth", var))
+		return git_config_string(&server.oauth, var, val);
 	else if (!strcmp("imap.port", var))
 		server.port = git_config_int(var, val);
 	else if (!strcmp("imap.host", var)) {
@@ -1432,7 +1436,23 @@ static CURL *setup_curl(struct imap_server_conf *srvc, struct credential *cred)
 
 	server_fill_credential(&server, cred);
 	curl_easy_setopt(curl, CURLOPT_USERNAME, server.user);
-	curl_easy_setopt(curl, CURLOPT_PASSWORD, server.pass);
+
+	if (server.oauth) {
+		struct strbuf sb = STRBUF_INIT;
+		size_t sz;
+		char *token;
+
+		sz = strbuf_read_file(&sb, server.oauth, 0);
+		if (sz < 0)
+			die("failed to read oauth token file");
+
+		strbuf_trim_trailing_newline(&sb);
+		token = strbuf_detach(&sb, &sz);
+		curl_easy_setopt(curl, CURLOPT_XOAUTH2_BEARER, token);
+		free(token);
+	} else {
+		curl_easy_setopt(curl, CURLOPT_PASSWORD, server.pass);
+	}
 
 	strbuf_addstr(&path, server.use_ssl ? "imaps://" : "imap://");
 	strbuf_addstr(&path, server.host);
